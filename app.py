@@ -1,11 +1,60 @@
 import streamlit as st
 import pandas as pd
+
 from io import BytesIO
-from pathlib import Path
 from datetime import datetime
 
+import gspread
+from google.oauth2.service_account import Credentials
+
 # ------------ CONFIG ------------
+
 st.set_page_config(page_title="Mason Data Manager", layout="wide")
+
+# 🔗 GOOGLE SHEET CONFIG
+GOOGLE_SHEET_ID = "1JEAVT5DusNCw5kYaClvAPkA6_AtRJa0p46nS3r0vEKs"
+SHEET_TAB_NAME = "Master"  # make sure this tab exists in your Google Sheet
+
+# ------------ GOOGLE SHEETS HELPERS ------------
+
+def get_gsheet_client():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=scopes
+    )
+    return gspread.authorize(creds)
+
+def read_sheet(sheet_id: str, tab: str = SHEET_TAB_NAME) -> pd.DataFrame:
+    gc = get_gsheet_client()
+    sh = gc.open_by_key(sheet_id)
+    ws = sh.worksheet(tab)
+    data = ws.get_all_records()
+    return pd.DataFrame(data)
+
+def write_sheet(sheet_id: str, df: pd.DataFrame, tab: str = SHEET_TAB_NAME):
+    gc = get_gsheet_client()
+    sh = gc.open_by_key(sheet_id)
+    try:
+        ws = sh.worksheet(tab)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=tab, rows="5000", cols="30")
+
+    ws.clear()
+
+    if df.empty:
+        return
+
+    # Convert everything to string to avoid type issues
+    values = [df.columns.tolist()] + df.astype(str).values.tolist()
+    ws.update(values)
+
+def save_monthly_snapshot():
+    month_tab = datetime.now().strftime("%Y_%b")  # e.g. 2025_Nov
+    write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], month_tab)
+    st.success(f"Monthly report saved to tab: {month_tab}")
 
 # Header similar to your HTML Mason Data Explorer
 st.markdown(
@@ -23,6 +72,7 @@ st.markdown(
 )
 
 # ------------ GLOBAL CSS (theme) ------------
+
 st.markdown("""
 <style>
 /* Page & layout */
@@ -198,21 +248,21 @@ def to_excel(df: pd.DataFrame) -> bytes:
         df.to_excel(writer, index=False, sheet_name="MasonData")
     return output.getvalue()
 
-DATA_FILE = "mason_data.xlsx"
-
 def get_initial_dataset() -> pd.DataFrame:
-    if Path(DATA_FILE).exists():
-        df = pd.read_excel(DATA_FILE)
+    try:
+        df = read_sheet(GOOGLE_SHEET_ID, SHEET_TAB_NAME)
+        if df.empty:
+            raise ValueError("Empty sheet")
         return clean_dataframe(df)
-
-    st.warning("No DATA_FILE found. Starting with empty dataset. Use Import Excel or Add Single Entry.")
-    df = pd.DataFrame(columns=[
-        "S.NO", "MASON CODE", "MASON NAME", "CONTACT NUMBER",
-        "DLR NAME", "Location", "DAY", "Category",
-        "HW305", "HW101", "Hw201", "HW103", "HW302", "HW310", "other",
-        "Visited_Status", "Visited_At", "Registered_Status", "Registered_At"
-    ])
-    return df
+    except Exception as e:
+        st.warning(f"No data found in Google Sheet or error loading it. Starting with empty dataset. ({e})")
+        df = pd.DataFrame(columns=[
+            "S.NO", "MASON CODE", "MASON NAME", "CONTACT NUMBER",
+            "DLR NAME", "Location", "DAY", "Category",
+            "HW305", "HW101", "Hw201", "HW103", "HW302", "HW310", "other",
+            "Visited_Status", "Visited_At", "Registered_Status", "Registered_At"
+        ])
+        return df
 
 # ------------ SESSION STATE INIT ------------
 
@@ -253,7 +303,7 @@ if st.session_state.get("reset_filters", False):
 # ------------ INLINE UPDATE FUNCTION FOR CARDS ------------
 
 def update_entry(sno: int, column_name: str, widget_key: str, is_checkbox: bool = False):
-    """Update a single cell in st.session_state['data'] from a widget."""
+    """Update a single cell in st.session_state['data'] from a widget and push to Google Sheets."""
     df = st.session_state["data"]
     if "S.NO" not in df.columns:
         return
@@ -269,7 +319,7 @@ def update_entry(sno: int, column_name: str, widget_key: str, is_checkbox: bool 
         df.loc[mask, column_name] = val
 
     st.session_state["data"] = df
-    st.session_state["data"].to_excel(DATA_FILE, index=False)
+    write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], SHEET_TAB_NAME)
 
 # ------------ DATA MANAGEMENT EXPANDER ------------
 
@@ -280,11 +330,11 @@ with st.expander("🛠️ Data Management (Import / Add / Undo)", expanded=False
         if st.button("↩️ Undo Last Change", type="primary"):
             st.session_state["data"] = st.session_state["prev_data"]
             st.session_state["prev_data"] = None
-            st.session_state["data"].to_excel(DATA_FILE, index=False)
+            write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], SHEET_TAB_NAME)
             st.success("Restored previous version!")
             st.rerun()
 
-    op_tab1, op_tab2 = st.tabs(["➕ Add Single Entry", "📂 Import Excel"])
+    op_tab1, op_tab2, op_tab3 = st.tabs(["➕ Add Single Entry", "📂 Import Excel", "📅 Monthly Snapshot"])
 
     # --- IMPORT TAB ---
     with op_tab2:
@@ -301,8 +351,8 @@ with st.expander("🛠️ Data Management (Import / Add / Undo)", expanded=False
                         for col in ["Visited_Status", "Visited_At", "Registered_Status", "Registered_At"]:
                             if col not in st.session_state["data"].columns:
                                 st.session_state["data"][col] = ""
-                        st.session_state["data"].to_excel(DATA_FILE, index=False)
-                        st.success(f"Loaded {len(new_data)} rows and saved to {DATA_FILE}!")
+                        write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], SHEET_TAB_NAME)
+                        st.success(f"Loaded {len(new_data)} rows and saved to Google Sheet!")
                         st.rerun()
 
     # --- ADD ENTRY TAB ---
@@ -385,7 +435,7 @@ with st.expander("🛠️ Data Management (Import / Add / Undo)", expanded=False
                         [st.session_state["data"], pd.DataFrame([new_row])],
                         ignore_index=True,
                     )
-                    st.session_state["data"].to_excel(DATA_FILE, index=False)
+                    write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], SHEET_TAB_NAME)
 
                     # CLEAR FORM FIELDS
                     for key in [
@@ -398,7 +448,7 @@ with st.expander("🛠️ Data Management (Import / Add / Undo)", expanded=False
                     st.session_state["form_day"] = "MONDAY"
                     st.session_state["form_category"] = "E"
 
-                    st.success("Entry added & saved!")
+                    st.success("Entry added & saved to Google Sheet!")
                     st.rerun()
 
         with col2:
@@ -409,6 +459,12 @@ with st.expander("🛠️ Data Management (Import / Add / Undo)", expanded=False
                 file_name="mason_data_template.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+
+    # --- MONTHLY SNAPSHOT TAB ---
+    with op_tab3:
+        st.info("Save the current data as a monthly snapshot sheet in the same Google Sheet.")
+        if st.button("📅 Save Monthly Report to Google Sheet"):
+            save_monthly_snapshot()
 
 # ------------ FILTER SECTION ------------
 
@@ -606,11 +662,11 @@ tab_cards, tab_graphs, tab_data = st.tabs(
 )
 
 # ==========================================
-#        NEW EDITABLE CARDS SECTION
+#        EDITABLE CARDS SECTION
 # ==========================================
 with tab_cards:
     st.subheader("Mason Directory")
-    st.info("💡 **Tip:** Click a card to expand. Any change you make inside is **saved automatically**.")
+    st.info("💡 Tip: Click a card to expand. Any change you make inside is saved to Google Sheets automatically.")
 
     if df_display.empty:
         st.warning("No records found matching filters.")
@@ -755,7 +811,7 @@ with tab_cards:
                         st.session_state["data"].loc[st.session_state["data"]["S.NO"] == sno, "Visited_At"] = (
                             datetime.now().strftime("%Y-%m-%d") if new_status else ""
                         )
-                        st.session_state["data"].to_excel(DATA_FILE, index=False)
+                        write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], SHEET_TAB_NAME)
                         st.rerun()
 
                 with b3:
@@ -767,7 +823,7 @@ with tab_cards:
                         st.session_state["data"].loc[st.session_state["data"]["S.NO"] == sno, "Registered_At"] = (
                             datetime.now().strftime("%Y-%m-%d") if new_status else ""
                         )
-                        st.session_state["data"].to_excel(DATA_FILE, index=False)
+                        write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], SHEET_TAB_NAME)
                         st.rerun()
 
 # ----- ANALYTICS TAB -----
@@ -838,6 +894,10 @@ with tab_data:
     )
 
     st.write("---")
+
+    # NOTE: This editor is currently "view-only" w.r.t Google Sheets.
+    # If you want Save from editor to Google Sheet, we can add a button
+    # that merges edited_df back into st.session_state["data"] by S.NO and calls write_sheet.
 
     if not st.session_state["data"].empty:
         st.download_button(
