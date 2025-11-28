@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-
 from io import BytesIO
 from datetime import datetime
 
@@ -13,7 +12,7 @@ st.set_page_config(page_title="Mason Data Manager", layout="wide")
 
 # 🔗 GOOGLE SHEET CONFIG
 GOOGLE_SHEET_ID = "1JEAVT5DusNCw5kYaClvAPkA6_AtRJa0p46nS3r0vEKs"
-SHEET_TAB_NAME = "Master"  # make sure this tab exists in your Google Sheet
+SHEET_TAB_NAME = "Master"  # change if your tab name is different
 
 # ------------ GOOGLE SHEETS HELPERS ------------
 
@@ -47,7 +46,6 @@ def write_sheet(sheet_id: str, df: pd.DataFrame, tab: str = SHEET_TAB_NAME):
     if df.empty:
         return
 
-    # Convert everything to string to avoid type issues
     values = [df.columns.tolist()] + df.astype(str).values.tolist()
     ws.update(values)
 
@@ -56,7 +54,8 @@ def save_monthly_snapshot():
     write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], month_tab)
     st.success(f"Monthly report saved to tab: {month_tab}")
 
-# Header similar to your HTML Mason Data Explorer
+# ------------ HEADER ------------
+
 st.markdown(
     """
     <header class="mde-header">
@@ -205,7 +204,7 @@ div.stButton > button {
 </style>
 """, unsafe_allow_html=True)
 
-# Optional Tailwind JS (not required but harmless)
+# Optional Tailwind JS
 st.markdown('<script src="https://cdn.tailwindcss.com"></script>', unsafe_allow_html=True)
 
 # ------------ HELPERS ------------
@@ -303,10 +302,11 @@ if st.session_state.get("reset_filters", False):
 # ------------ INLINE UPDATE FUNCTION FOR CARDS ------------
 
 def update_entry(sno: int, column_name: str, widget_key: str, is_checkbox: bool = False):
-    """Update a single cell in st.session_state['data'] from a widget and push to Google Sheets."""
+    """Update one field from card widgets and push to Google Sheets."""
     df = st.session_state["data"]
     if "S.NO" not in df.columns:
         return
+
     mask = df["S.NO"] == sno
     if not mask.any():
         return
@@ -319,7 +319,7 @@ def update_entry(sno: int, column_name: str, widget_key: str, is_checkbox: bool 
         df.loc[mask, column_name] = val
 
     st.session_state["data"] = df
-    write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], SHEET_TAB_NAME)
+    write_sheet(GOOGLE_SHEET_ID, df.copy(), SHEET_TAB_NAME)
 
 # ------------ DATA MANAGEMENT EXPANDER ------------
 
@@ -774,7 +774,7 @@ with tab_cards:
                             value=is_checked,
                             key=f"{prod}_{sno}",
                             on_change=update_entry,
-                            args=(sno, prod, f"{prod}_{sno}", True)  # checkbox logic
+                            args=(sno, prod, f"{prod}_{sno}", True)
                         )
 
                 # 4. REMARKS / OTHER
@@ -806,24 +806,28 @@ with tab_cards:
                     v_label = "✅ Visited" if is_visited else "Mark Visited"
                     v_type = "primary" if is_visited else "secondary"
                     if st.button(v_label, key=f"btn_vis_{sno}", type=v_type, use_container_width=True):
+                        df = st.session_state["data"]
                         new_status = "" if is_visited else "Visited"
-                        st.session_state["data"].loc[st.session_state["data"]["S.NO"] == sno, "Visited_Status"] = new_status
-                        st.session_state["data"].loc[st.session_state["data"]["S.NO"] == sno, "Visited_At"] = (
+                        df.loc[df["S.NO"] == sno, "Visited_Status"] = new_status
+                        df.loc[df["S.NO"] == sno, "Visited_At"] = (
                             datetime.now().strftime("%Y-%m-%d") if new_status else ""
                         )
-                        write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], SHEET_TAB_NAME)
+                        st.session_state["data"] = df
+                        write_sheet(GOOGLE_SHEET_ID, df.copy(), SHEET_TAB_NAME)
                         st.rerun()
 
                 with b3:
                     r_label = "✅ Registered" if is_registered else "Mark Registered"
                     r_type = "primary" if is_registered else "secondary"
                     if st.button(r_label, key=f"btn_reg_{sno}", type=r_type, use_container_width=True):
+                        df = st.session_state["data"]
                         new_status = "" if is_registered else "Registered"
-                        st.session_state["data"].loc[st.session_state["data"]["S.NO"] == sno, "Registered_Status"] = new_status
-                        st.session_state["data"].loc[st.session_state["data"]["S.NO"] == sno, "Registered_At"] = (
+                        df.loc[df["S.NO"] == sno, "Registered_Status"] = new_status
+                        df.loc[df["S.NO"] == sno, "Registered_At"] = (
                             datetime.now().strftime("%Y-%m-%d") if new_status else ""
                         )
-                        write_sheet(GOOGLE_SHEET_ID, st.session_state["data"], SHEET_TAB_NAME)
+                        st.session_state["data"] = df
+                        write_sheet(GOOGLE_SHEET_ID, df.copy(), SHEET_TAB_NAME)
                         st.rerun()
 
 # ----- ANALYTICS TAB -----
@@ -869,7 +873,7 @@ with tab_graphs:
 
 # ----- DATA EDITOR TAB -----
 with tab_data:
-    st.subheader("Raw Data Table (Editable)")
+    st.subheader("Raw Data Table (Editable View)")
 
     column_config = {
         "CONTACT NUMBER": st.column_config.TextColumn("Contact"),
@@ -895,10 +899,7 @@ with tab_data:
 
     st.write("---")
 
-    # NOTE: This editor is currently "view-only" w.r.t Google Sheets.
-    # If you want Save from editor to Google Sheet, we can add a button
-    # that merges edited_df back into st.session_state["data"] by S.NO and calls write_sheet.
-
+    # Currently view-only for Google Sheets. Use cards for edits.
     if not st.session_state["data"].empty:
         st.download_button(
             "📥 Download Full Current Report (All Masons)",
