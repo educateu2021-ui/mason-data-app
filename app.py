@@ -884,6 +884,7 @@ with tab_data:
         "HW310": st.column_config.TextColumn("HW310", width="small"),
     }
 
+    # Work on the currently visible (filtered) data
     edit_df = df_display.copy()
     if not edit_df.empty and "CONTACT NUMBER" in edit_df.columns:
         edit_df["CONTACT NUMBER"] = edit_df["CONTACT NUMBER"].astype(str)
@@ -894,28 +895,44 @@ with tab_data:
         use_container_width=True,
         height=500,
         column_config=column_config,
+        key="data_editor",
     )
 
     st.write("---")
 
-    # Currently view-only for Google Sheets. Use cards for edits.
-    if not st.session_state["data"].empty:
-        st.download_button(
-            "📥 Download Full Current Report (All Masons)",
-            to_excel(st.session_state["data"]),
-            "mason_full_report.xlsx",
-        )
+    # Row: left = download, right = save to Google Sheet
+    c1, c2 = st.columns([2, 1])
 
-# ------------ TOP RIGHT SHEET UPDATE BUTTON ------------
-
-top_left, top_right = st.columns([5, 1])
-
-with top_right:
-    if st.button("💾 Update Google Sheet", key="btn_sync_top", use_container_width=True):
+    with c1:
         if not st.session_state["data"].empty:
-            write_sheet(GOOGLE_SHEET_ID, st.session_state["data"].copy(), SHEET_TAB_NAME)
-            st.success("Google Sheet updated with current Mason data!")
-        else:
-            st.warning("No data to update. Add or import some rows first.")
+            st.download_button(
+                "📥 Download Full Current Report (All Masons)",
+                to_excel(st.session_state["data"]),
+                "mason_full_report.xlsx",
+            )
 
+    with c2:
+        if st.button("💾 Save Changes to Google Sheet", use_container_width=True):
+            if edited_df.empty:
+                st.warning("No rows in the editor to save.")
+            else:
+                # Merge only edited visible rows back into full dataset
+                full_df = st.session_state["data"].copy()
 
+                if "S.NO" in edited_df.columns and "S.NO" in full_df.columns:
+                    full_df = full_df.set_index("S.NO")
+                    edited_idx = edited_df.set_index("S.NO")
+
+                    # Update matching S.NO rows with edited values
+                    full_df.update(edited_idx)
+
+                    full_df.reset_index(inplace=True)
+                else:
+                    # Fallback: overwrite everything (if no S.NO present)
+                    full_df = edited_df.copy()
+
+                # Save back to session + Google Sheet
+                st.session_state["data"] = full_df
+                write_sheet(GOOGLE_SHEET_ID, full_df.copy(), SHEET_TAB_NAME)
+                st.success("Changes saved to Google Sheet from Data Editor!")
+                st.rerun()
