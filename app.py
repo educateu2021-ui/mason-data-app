@@ -69,43 +69,6 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-# ------------ TOP RIGHT UPDATE BUTTON ABSOLUTE POSITION ------------
-
-st.markdown("""
-<style>
-.update-btn-container {
-    position: absolute;
-    top: 90px;
-    right: 30px;
-    z-index: 9999;
-}
-</style>
-
-<div class="update-btn-container">
-    <form action="#" method="post">
-        <button name="update_sheet" class="st-emotion-cache-1qg05tj">💾 Update Google Sheet</button>
-    </form>
-</div>
-""", unsafe_allow_html=True)
-
-# Handle button click
-if "update_sheet" in st.session_state:
-    pass
-
-# Detect the HTML button click
-import streamlit as st
-from streamlit_js_eval import streamlit_js_eval
-
-clicked = streamlit_js_eval(js_expressions="parent.document.activeElement.innerText", want_output=True)
-
-if clicked == "💾 Update Google Sheet":
-    if not st.session_state["data"].empty:
-        write_sheet(GOOGLE_SHEET_ID, st.session_state["data"].copy(), SHEET_TAB_NAME)
-        st.success("Google Sheet Updated Successfully!")
-        st.rerun()
-    else:
-        st.warning("No data available to update.")
-
 # ------------ GLOBAL CSS (theme) ------------
 
 st.markdown("""
@@ -954,4 +917,5 @@ with top_right:
             st.success("Google Sheet updated with current Mason data!")
         else:
             st.warning("No data to update. Add or import some rows first.")
+
 
