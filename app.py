@@ -906,3 +906,15 @@ with tab_data:
             to_excel(st.session_state["data"]),
             "mason_full_report.xlsx",
         )
+
+# ------------ TOP RIGHT SHEET UPDATE BUTTON ------------
+
+top_left, top_right = st.columns([5, 1])
+
+with top_right:
+    if st.button("💾 Update Google Sheet", key="btn_sync_top", use_container_width=True):
+        if not st.session_state["data"].empty:
+            write_sheet(GOOGLE_SHEET_ID, st.session_state["data"].copy(), SHEET_TAB_NAME)
+            st.success("Google Sheet updated with current Mason data!")
+        else:
+            st.warning("No data to update. Add or import some rows first.")
